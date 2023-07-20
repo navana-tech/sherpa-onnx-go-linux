@@ -2,5 +2,5 @@
 
 package sherpa_onnx
 
-// #cgo LDFLAGS: -L ${SRCDIR}/../lib/x86_64-linux-gnu -lsherpa-onnx-c-api -lsherpa-onnx-core -lkaldi-native-fbank-core -lonnxruntime -Wl,-rpath,${SRCDIR}/../lib/x86_64-linux-gnu
+// #cgo LDFLAGS: -L ${SRCDIR}/../lib/x86_64-unknown-linux-gnu -lsherpa-onnx-c-api -lsherpa-onnx-core -lkaldi-native-fbank-core -lonnxruntime -Wl,-rpath,${SRCDIR}/../lib/x86_64-unknown-linux-gnu
 import "C"
