@@ -74,6 +74,11 @@ type OnlineZipformer2CtcModelConfig struct {
 	Model string // Path to the onnx model
 }
 
+type OnlineLMConfig struct {
+	Model string  // Path to the model
+	Scale float32 // scale for LM score
+}
+
 // Configuration for online/streaming models
 //
 // Please refer to
@@ -112,6 +117,7 @@ type OnlineCtcFstDecoderConfig struct {
 type OnlineRecognizerConfig struct {
 	FeatConfig  FeatureConfig
 	ModelConfig OnlineModelConfig
+	LmConfig    OnlineLMConfig
 
 	// Valid decoding methods: greedy_search, modified_beam_search
 	DecodingMethod string
@@ -132,6 +138,7 @@ type OnlineRecognizerConfig struct {
 	HotwordsFile            string
 	HotwordsScore           float32
 	BlankPenalty            float32
+	TemperatureScale        float32
 	CtcFstDecoderConfig     OnlineCtcFstDecoderConfig
 	RuleFsts                string
 	RuleFars                string
@@ -207,6 +214,11 @@ func NewOnlineRecognizer(config *OnlineRecognizerConfig) *OnlineRecognizer {
 	c.model_config.bpe_vocab = C.CString(config.ModelConfig.BpeVocab)
 	defer C.free(unsafe.Pointer(c.model_config.bpe_vocab))
 
+	c.lm_config.model = C.CString(config.LmConfig.Model)
+	defer C.free(unsafe.Pointer(c.lm_config.model))
+
+	c.lm_config.scale = C.float(config.LmConfig.Scale)
+
 	c.decoding_method = C.CString(config.DecodingMethod)
 	defer C.free(unsafe.Pointer(c.decoding_method))
 
@@ -221,6 +233,7 @@ func NewOnlineRecognizer(config *OnlineRecognizerConfig) *OnlineRecognizer {
 
 	c.hotwords_score = C.float(config.HotwordsScore)
 	c.blank_penalty = C.float(config.BlankPenalty)
+	c.temperature_scale = C.float(config.TemperatureScale)
 
 	c.rule_fsts = C.CString(config.RuleFsts)
 	defer C.free(unsafe.Pointer(c.rule_fsts))
