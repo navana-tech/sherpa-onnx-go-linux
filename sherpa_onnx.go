@@ -403,6 +403,33 @@ func (recognizer *OnlineRecognizer) GetAllResults(s *OnlineStream) *OnlineRecogn
 	}
 }
 
+// Helper function to convert C **_Ctype_char to Go []string
+func cStringArrayToGoSlice(cArray **C.char, length C.int) []string {
+	if cArray == nil || length == 0 {
+		return nil // Return empty slice if cArray is nil or length is zero
+	}
+	var result []string
+	slice := (*[1 << 28]*C.char)(unsafe.Pointer(cArray))[:length:length]
+	for _, str := range slice {
+		if str != nil {
+			result = append(result, C.GoString(str))
+		}
+	}
+	return result
+}
+// Helper function to convert C *_Ctype_float to Go []float32
+func cFloatArrayToGoSlice(cArray *C.float, length C.int) []float32 {
+	if cArray == nil || length == 0 {
+		return nil // Return empty slice if cArray is nil or length is zero
+	}
+	var result []float32
+	slice := (*[1 << 28]C.float)(unsafe.Pointer(cArray))[:length:length]
+	for _, f := range slice {
+		result = append(result, float32(f))
+	}
+	return result
+}
+
 func (recognizer *OnlineRecognizer) GetJsonResult(s *OnlineStream) *OnlineRecognizerResult {
 	p := C.SherpaOnnxGetOnlineStreamResult(recognizer.impl, s.impl)
 	defer C.SherpaOnnxDestroyOnlineRecognizerResult(p)
