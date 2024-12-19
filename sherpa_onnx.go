@@ -42,9 +42,7 @@ package sherpa_onnx
 // #include <stdlib.h>
 // #include "c-api.h"
 import "C"
-import (
-	"unsafe"
-)
+import "unsafe"
 
 // Configuration for online/streaming transducer models
 //
@@ -74,6 +72,12 @@ type OnlineZipformer2CtcModelConfig struct {
 	Model string // Path to the onnx model
 }
 
+type OnlineLMConfig struct {
+	Model string  // Path to the model
+	Scale float32 // scale for LM score
+}
+
+
 // Configuration for online/streaming models
 //
 // Please refer to
@@ -91,6 +95,8 @@ type OnlineModelConfig struct {
 	ModelType     string // Optional. You can specify it for faster model initialization
 	ModelingUnit  string // Optional. cjkchar, bpe, cjkchar+bpe
 	BpeVocab      string // Optional.
+	TokensBuf     string // Optional.
+	TokensBufSize int    // Optional.
 }
 
 // Configuration for the feature extractor
@@ -112,6 +118,7 @@ type OnlineCtcFstDecoderConfig struct {
 type OnlineRecognizerConfig struct {
 	FeatConfig  FeatureConfig
 	ModelConfig OnlineModelConfig
+	LmConfig    OnlineLMConfig
 
 	// Valid decoding methods: greedy_search, modified_beam_search
 	DecodingMethod string
@@ -132,20 +139,16 @@ type OnlineRecognizerConfig struct {
 	HotwordsFile            string
 	HotwordsScore           float32
 	BlankPenalty            float32
-	TemperatureScale        float32
 	CtcFstDecoderConfig     OnlineCtcFstDecoderConfig
 	RuleFsts                string
 	RuleFars                string
+	HotwordsBuf             string
+	HotwordsBufSize         int
 }
 
 // It contains the recognition result for a online stream.
 type OnlineRecognizerResult struct {
-	Text       string     // Required field
-	Tokens     *string    // Optional
-	TokensArr  *[]string  // Optional
-	Timestamps *[]float32 // Optional
-	Count      *int32     // Optional
-	Json       *string    // Optional
+	Text string
 }
 
 // The online recognizer class. It wraps a pointer from C.
@@ -192,6 +195,11 @@ func NewOnlineRecognizer(config *OnlineRecognizerConfig) *OnlineRecognizer {
 	c.model_config.tokens = C.CString(config.ModelConfig.Tokens)
 	defer C.free(unsafe.Pointer(c.model_config.tokens))
 
+	c.model_config.tokens_buf = C.CString(config.ModelConfig.TokensBuf)
+	defer C.free(unsafe.Pointer(c.model_config.tokens_buf))
+
+	c.model_config.tokens_buf_size = C.int(config.ModelConfig.TokensBufSize)
+
 	c.model_config.num_threads = C.int(config.ModelConfig.NumThreads)
 
 	c.model_config.provider = C.CString(config.ModelConfig.Provider)
@@ -211,6 +219,11 @@ func NewOnlineRecognizer(config *OnlineRecognizerConfig) *OnlineRecognizer {
 	c.decoding_method = C.CString(config.DecodingMethod)
 	defer C.free(unsafe.Pointer(c.decoding_method))
 
+	c.lm_config.model = C.CString(config.LmConfig.Model)
+	defer C.free(unsafe.Pointer(c.lm_config.model))
+
+	c.lm_config.scale = C.float(config.LmConfig.Scale)
+
 	c.max_active_paths = C.int(config.MaxActivePaths)
 	c.enable_endpoint = C.int(config.EnableEndpoint)
 	c.rule1_min_trailing_silence = C.float(config.Rule1MinTrailingSilence)
@@ -220,9 +233,13 @@ func NewOnlineRecognizer(config *OnlineRecognizerConfig) *OnlineRecognizer {
 	c.hotwords_file = C.CString(config.HotwordsFile)
 	defer C.free(unsafe.Pointer(c.hotwords_file))
 
+	c.hotwords_buf = C.CString(config.HotwordsBuf)
+	defer C.free(unsafe.Pointer(c.hotwords_buf))
+
+	c.hotwords_buf_size = C.int(config.HotwordsBufSize)
+
 	c.hotwords_score = C.float(config.HotwordsScore)
 	c.blank_penalty = C.float(config.BlankPenalty)
-	c.temperature_scale = C.float(config.TemperatureScale)
 
 	c.rule_fsts = C.CString(config.RuleFsts)
 	defer C.free(unsafe.Pointer(c.rule_fsts))
@@ -340,100 +357,6 @@ func (recognizer *OnlineRecognizer) GetResult(s *OnlineStream) *OnlineRecognizer
 	return result
 }
 
-// GetAllResults returns all fields, making non-required fields optional.
-func (recognizer *OnlineRecognizer) GetAllResults(s *OnlineStream) *OnlineRecognizerResult {
-	p := C.SherpaOnnxGetOnlineStreamResult(recognizer.impl, s.impl)
-	defer C.SherpaOnnxDestroyOnlineRecognizerResult(p)
-
-	// Check for nil pointers before conversion
-	var tokens *string
-	if p.tokens != nil {
-		t := C.GoString(p.tokens)
-		tokens = &t
-	}
-
-	var tokensArr *[]string
-	if p.tokens_arr != nil {
-		arr := cStringArrayToGoSlice(p.tokens_arr, p.count)
-		tokensArr = &arr
-	}
-
-	var timestamps *[]float32
-	if p.timestamps != nil {
-		ts := cFloatArrayToGoSlice(p.timestamps, p.count)
-		timestamps = &ts
-	}
-
-	var count *int32
-	if p.count != 0 {
-		c := int32(p.count)
-		count = &c
-	}
-
-	var jsonStr *string
-	if p.json != nil {
-		j := C.GoString(p.json)
-		jsonStr = &j
-	}
-
-	return &OnlineRecognizerResult{
-		Text:       C.GoString(p.text), // Required
-		Tokens:     tokens,             // Optional
-		TokensArr:  tokensArr,          // Optional
-		Timestamps: timestamps,         // Optional
-		Count:      count,              // Optional
-		Json:       jsonStr,            // Optional
-	}
-}
-
-func (recognizer *OnlineRecognizer) GetJsonResult(s *OnlineStream) *OnlineRecognizerResult {
-	p := C.SherpaOnnxGetOnlineStreamResult(recognizer.impl, s.impl)
-	defer C.SherpaOnnxDestroyOnlineRecognizerResult(p)
-
-	// Check if JSON field is not nil
-	result := &OnlineRecognizerResult{}
-	result.Text = C.GoString(p.text)
-	var jsonStr *string
-	if p.json != nil {
-		j := C.GoString(p.json)
-		jsonStr = &j
-	}
-
-	result.Json = jsonStr
-	return result
-
-}
-
-// Helper function to convert C **_Ctype_char to Go []string
-func cStringArrayToGoSlice(cArray **C.char, length C.int) []string {
-	if cArray == nil || length == 0 {
-		return nil // Return empty slice if cArray is nil or length is zero
-	}
-
-	var result []string
-	slice := (*[1 << 28]*C.char)(unsafe.Pointer(cArray))[:length:length]
-	for _, str := range slice {
-		if str != nil {
-			result = append(result, C.GoString(str))
-		}
-	}
-	return result
-}
-
-// Helper function to convert C *_Ctype_float to Go []float32
-func cFloatArrayToGoSlice(cArray *C.float, length C.int) []float32 {
-	if cArray == nil || length == 0 {
-		return nil // Return empty slice if cArray is nil or length is zero
-	}
-
-	var result []float32
-	slice := (*[1 << 28]C.float)(unsafe.Pointer(cArray))[:length:length]
-	for _, f := range slice {
-		result = append(result, float32(f))
-	}
-	return result
-}
-
 // Configuration for offline/non-streaming transducer.
 //
 // Please refer to
@@ -471,6 +394,13 @@ type OfflineWhisperModelConfig struct {
 	TailPaddings int
 }
 
+type OfflineMoonshineModelConfig struct {
+	Preprocessor    string
+	Encoder         string
+	UncachedDecoder string
+	CachedDecoder   string
+}
+
 type OfflineTdnnModelConfig struct {
 	Model string
 }
@@ -494,6 +424,7 @@ type OfflineModelConfig struct {
 	Whisper    OfflineWhisperModelConfig
 	Tdnn       OfflineTdnnModelConfig
 	SenseVoice OfflineSenseVoiceModelConfig
+	Moonshine  OfflineMoonshineModelConfig
 	Tokens     string // Path to tokens.txt
 
 	// Number of threads to use for neural network computation
@@ -543,7 +474,12 @@ type OfflineStream struct {
 
 // It contains recognition result of an offline stream.
 type OfflineRecognizerResult struct {
-	Text string
+	Text       string
+	Tokens     []string
+	Timestamps []float32
+	Lang       string
+	Emotion    string
+	Event      string
 }
 
 // Frees the internal pointer of the recognition to avoid memory leak.
@@ -598,6 +534,18 @@ func NewOfflineRecognizer(config *OfflineRecognizerConfig) *OfflineRecognizer {
 	defer C.free(unsafe.Pointer(c.model_config.sense_voice.language))
 
 	c.model_config.sense_voice.use_itn = C.int(config.ModelConfig.SenseVoice.UseInverseTextNormalization)
+
+	c.model_config.moonshine.preprocessor = C.CString(config.ModelConfig.Moonshine.Preprocessor)
+	defer C.free(unsafe.Pointer(c.model_config.moonshine.preprocessor))
+
+	c.model_config.moonshine.encoder = C.CString(config.ModelConfig.Moonshine.Encoder)
+	defer C.free(unsafe.Pointer(c.model_config.moonshine.encoder))
+
+	c.model_config.moonshine.uncached_decoder = C.CString(config.ModelConfig.Moonshine.UncachedDecoder)
+	defer C.free(unsafe.Pointer(c.model_config.moonshine.uncached_decoder))
+
+	c.model_config.moonshine.cached_decoder = C.CString(config.ModelConfig.Moonshine.CachedDecoder)
+	defer C.free(unsafe.Pointer(c.model_config.moonshine.cached_decoder))
 
 	c.model_config.tokens = C.CString(config.ModelConfig.Tokens)
 	defer C.free(unsafe.Pointer(c.model_config.tokens))
@@ -694,9 +642,28 @@ func (recognizer *OfflineRecognizer) DecodeStreams(s []*OfflineStream) {
 func (s *OfflineStream) GetResult() *OfflineRecognizerResult {
 	p := C.SherpaOnnxGetOfflineStreamResult(s.impl)
 	defer C.SherpaOnnxDestroyOfflineRecognizerResult(p)
+	n := int(p.count)
+	if n == 0 {
+		return nil
+	}
 	result := &OfflineRecognizerResult{}
 	result.Text = C.GoString(p.text)
-
+	result.Lang = C.GoString(p.lang)
+	result.Emotion = C.GoString(p.emotion)
+	result.Event = C.GoString(p.event)
+	result.Tokens = make([]string, n)
+	tokens := (*[1 << 28]*C.char)(unsafe.Pointer(p.tokens_arr))[:n:n]
+	for i := 0; i < n; i++ {
+		result.Tokens[i] = C.GoString(tokens[i])
+	}
+	if p.timestamps == nil {
+		return result
+	}
+	result.Timestamps = make([]float32, n)
+	timestamps := (*[1 << 28]C.float)(unsafe.Pointer(p.timestamps))[:n:n]
+	for i := 0; i < n; i++ {
+		result.Timestamps[i] = float32(timestamps[i])
+	}
 	return result
 }
 
@@ -839,6 +806,7 @@ type SileroVadModelConfig struct {
 	MinSilenceDuration float32
 	MinSpeechDuration  float32
 	WindowSize         int
+	MaxSpeechDuration  float32
 }
 
 type VadModelConfig struct {
@@ -917,6 +885,7 @@ func NewVoiceActivityDetector(config *VadModelConfig, bufferSizeInSeconds float3
 	c.silero_vad.min_silence_duration = C.float(config.SileroVad.MinSilenceDuration)
 	c.silero_vad.min_speech_duration = C.float(config.SileroVad.MinSpeechDuration)
 	c.silero_vad.window_size = C.int(config.SileroVad.WindowSize)
+	c.silero_vad.max_speech_duration = C.float(config.SileroVad.MaxSpeechDuration)
 
 	c.sample_rate = C.int(config.SampleRate)
 	c.num_threads = C.int(config.NumThreads)
@@ -1238,7 +1207,14 @@ func ReadWave(filename string) *Wave {
 	w := C.SherpaOnnxReadWave(s)
 	defer C.SherpaOnnxFreeWave(w)
 
+	if w == nil {
+		return nil
+	}
+
 	n := int(w.num_samples)
+	if n == 0 {
+		return nil
+	}
 
 	ans := &Wave{}
 	ans.SampleRate = int(w.sample_rate)
@@ -1251,4 +1227,173 @@ func ReadWave(filename string) *Wave {
 	}
 
 	return ans
+}
+
+// ============================================================
+// For offline speaker diarization
+// ============================================================
+type OfflineSpeakerSegmentationPyannoteModelConfig struct {
+	Model string
+}
+
+type OfflineSpeakerSegmentationModelConfig struct {
+	Pyannote   OfflineSpeakerSegmentationPyannoteModelConfig
+	NumThreads int
+	Debug      int
+	Provider   string
+}
+
+type FastClusteringConfig struct {
+	NumClusters int
+	Threshold   float32
+}
+
+type OfflineSpeakerDiarizationConfig struct {
+	Segmentation   OfflineSpeakerSegmentationModelConfig
+	Embedding      SpeakerEmbeddingExtractorConfig
+	Clustering     FastClusteringConfig
+	MinDurationOn  float32
+	MinDurationOff float32
+}
+
+type OfflineSpeakerDiarization struct {
+	impl *C.struct_SherpaOnnxOfflineSpeakerDiarization
+}
+
+func DeleteOfflineSpeakerDiarization(sd *OfflineSpeakerDiarization) {
+	C.SherpaOnnxDestroyOfflineSpeakerDiarization(sd.impl)
+	sd.impl = nil
+}
+
+func NewOfflineSpeakerDiarization(config *OfflineSpeakerDiarizationConfig) *OfflineSpeakerDiarization {
+	c := C.struct_SherpaOnnxOfflineSpeakerDiarizationConfig{}
+	c.segmentation.pyannote.model = C.CString(config.Segmentation.Pyannote.Model)
+	defer C.free(unsafe.Pointer(c.segmentation.pyannote.model))
+
+	c.segmentation.num_threads = C.int(config.Segmentation.NumThreads)
+
+	c.segmentation.debug = C.int(config.Segmentation.Debug)
+
+	c.segmentation.provider = C.CString(config.Segmentation.Provider)
+	defer C.free(unsafe.Pointer(c.segmentation.provider))
+
+	c.embedding.model = C.CString(config.Embedding.Model)
+	defer C.free(unsafe.Pointer(c.embedding.model))
+
+	c.embedding.num_threads = C.int(config.Embedding.NumThreads)
+
+	c.embedding.debug = C.int(config.Embedding.Debug)
+
+	c.embedding.provider = C.CString(config.Embedding.Provider)
+	defer C.free(unsafe.Pointer(c.embedding.provider))
+
+	c.clustering.num_clusters = C.int(config.Clustering.NumClusters)
+	c.clustering.threshold = C.float(config.Clustering.Threshold)
+	c.min_duration_on = C.float(config.MinDurationOn)
+	c.min_duration_off = C.float(config.MinDurationOff)
+
+	p := C.SherpaOnnxCreateOfflineSpeakerDiarization(&c)
+
+	if p == nil {
+		return nil
+	}
+
+	sd := &OfflineSpeakerDiarization{}
+	sd.impl = p
+
+	return sd
+}
+
+func (sd *OfflineSpeakerDiarization) SampleRate() int {
+	return int(C.SherpaOnnxOfflineSpeakerDiarizationGetSampleRate(sd.impl))
+}
+
+// only config.Clustering is used. All other fields are ignored
+func (sd *OfflineSpeakerDiarization) SetConfig(config *OfflineSpeakerDiarizationConfig) {
+	c := C.struct_SherpaOnnxOfflineSpeakerDiarizationConfig{}
+
+	c.clustering.num_clusters = C.int(config.Clustering.NumClusters)
+	c.clustering.threshold = C.float(config.Clustering.Threshold)
+
+	C.SherpaOnnxOfflineSpeakerDiarizationSetConfig(sd.impl, &c)
+}
+
+type OfflineSpeakerDiarizationSegment struct {
+	Start   float32
+	End     float32
+	Speaker int
+}
+
+func (sd *OfflineSpeakerDiarization) Process(samples []float32) []OfflineSpeakerDiarizationSegment {
+	r := C.SherpaOnnxOfflineSpeakerDiarizationProcess(sd.impl, (*C.float)(&samples[0]), C.int(len(samples)))
+	defer C.SherpaOnnxOfflineSpeakerDiarizationDestroyResult(r)
+
+	n := int(C.SherpaOnnxOfflineSpeakerDiarizationResultGetNumSegments(r))
+
+	if n == 0 {
+		return nil
+	}
+
+	s := C.SherpaOnnxOfflineSpeakerDiarizationResultSortByStartTime(r)
+	defer C.SherpaOnnxOfflineSpeakerDiarizationDestroySegment(s)
+
+	ans := make([]OfflineSpeakerDiarizationSegment, n)
+
+	p := (*[1 << 28]C.struct_SherpaOnnxOfflineSpeakerDiarizationSegment)(unsafe.Pointer(s))[:n:n]
+
+	for i := 0; i < n; i++ {
+		ans[i].Start = float32(p[i].start)
+		ans[i].End = float32(p[i].end)
+		ans[i].Speaker = int(p[i].speaker)
+	}
+
+	return ans
+}
+
+// ============================================================
+// For punctuation
+// ============================================================
+type OfflinePunctuationModelConfig struct {
+	CtTransformer string
+	NumThreads    C.int
+	Debug         C.int // true to print debug information of the model
+	Provider      string
+}
+
+type OfflinePunctuationConfig struct {
+	Model OfflinePunctuationModelConfig
+}
+
+type OfflinePunctuation struct {
+	impl *C.struct_SherpaOnnxOfflinePunctuation
+}
+
+func NewOfflinePunctuation(config *OfflinePunctuationConfig) *OfflinePunctuation {
+	cfg := C.struct_SherpaOnnxOfflinePunctuationConfig{}
+	cfg.model.ct_transformer = C.CString(config.Model.CtTransformer)
+	defer C.free(unsafe.Pointer(cfg.model.ct_transformer))
+
+	cfg.model.num_threads = config.Model.NumThreads
+	cfg.model.debug = config.Model.Debug
+	cfg.model.provider = C.CString(config.Model.Provider)
+	defer C.free(unsafe.Pointer(cfg.model.provider))
+
+	punc := &OfflinePunctuation{}
+	punc.impl = C.SherpaOnnxCreateOfflinePunctuation(&cfg)
+
+	return punc
+}
+
+func DeleteOfflinePunc(punc *OfflinePunctuation) {
+	C.SherpaOnnxDestroyOfflinePunctuation(punc.impl)
+	punc.impl = nil
+}
+
+func (punc *OfflinePunctuation) AddPunct(text string) string {
+	p := C.SherpaOfflinePunctuationAddPunct(punc.impl, C.CString(text))
+	defer C.free(unsafe.Pointer(p))
+
+	text_with_punct := C.GoString(p)
+
+	return text_with_punct
 }
