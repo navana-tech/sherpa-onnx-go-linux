@@ -154,6 +154,7 @@ type OnlineRecognizerResult struct {
 	Timestamps *[]float32 // Optional
 	Count      *int32     // Optional
 	Json       *string    // Optional
+	LogProbs 	*[][]float32 // Optional
 }
 
 // The online recognizer class. It wraps a pointer from C.
@@ -363,44 +364,56 @@ func (recognizer *OnlineRecognizer) GetResult(s *OnlineStream) *OnlineRecognizer
 	return result
 }
 
-// GetAllResults returns all fields, making non-required fields optional.
 func (recognizer *OnlineRecognizer) GetAllResults(s *OnlineStream) *OnlineRecognizerResult {
-	p := C.SherpaOnnxGetOnlineStreamResult(recognizer.impl, s.impl)
-	defer C.SherpaOnnxDestroyOnlineRecognizerResult(p)
-	// Check for nil pointers before conversion
-	var tokens *string
-	if p.tokens != nil {
-		t := C.GoString(p.tokens)
-		tokens = &t
-	}
-	var tokensArr *[]string
-	if p.tokens_arr != nil {
-		arr := cStringArrayToGoSlice(p.tokens_arr, p.count)
-		tokensArr = &arr
-	}
-	var timestamps *[]float32
-	if p.timestamps != nil {
-		ts := cFloatArrayToGoSlice(p.timestamps, p.count)
-		timestamps = &ts
-	}
-	var count *int32
-	if p.count != 0 {
-		c := int32(p.count)
-		count = &c
-	}
-	var jsonStr *string
-	if p.json != nil {
-		j := C.GoString(p.json)
-		jsonStr = &j
-	}
-	return &OnlineRecognizerResult{
-		Text:       C.GoString(p.text), // Required
-		Tokens:     tokens,             // Optional
-		TokensArr:  tokensArr,          // Optional
-		Timestamps: timestamps,         // Optional
-		Count:      count,              // Optional
-		Json:       jsonStr,            // Optional
-	}
+    p := C.SherpaOnnxGetOnlineStreamResult(recognizer.impl, s.impl)
+    defer C.SherpaOnnxDestroyOnlineRecognizerResult(p)
+    
+    // Check for nil pointers before conversion
+    var tokens *string
+    if p.tokens != nil {
+        t := C.GoString(p.tokens)
+        tokens = &t
+    }
+    
+    var tokensArr *[]string
+    if p.tokens_arr != nil {
+        arr := cStringArrayToGoSlice(p.tokens_arr, p.count)
+        tokensArr = &arr
+    }
+    
+    var timestamps *[]float32
+    if p.timestamps != nil {
+        ts := cFloatArrayToGoSlice(p.timestamps, p.count)
+        timestamps = &ts
+    }
+    
+    var count *int32
+    if p.count != 0 {
+        c := int32(p.count)
+        count = &c
+    }
+    
+    var jsonStr *string
+    if p.json != nil {
+        j := C.GoString(p.json)
+        jsonStr = &j
+    }
+
+    var logProbs *[][]float32
+    if p.log_probs != nil && p.num_log_probs > 0 {
+        lp := cFloat2DArrayToGoSlice(p.log_probs, p.num_log_probs,  p.log_probs_dim)
+        logProbs = &lp
+    }
+
+    return &OnlineRecognizerResult{
+        Text:       C.GoString(p.text), // Required
+        Tokens:     tokens,             // Optional
+        TokensArr:  tokensArr,          // Optional
+        Timestamps: timestamps,         // Optional
+        Count:      count,              // Optional
+        Json:       jsonStr,            // Optional
+        LogProbs:   logProbs,           // Optional
+    }
 }
 
 // Helper function to convert C **_Ctype_char to Go []string
@@ -430,6 +443,27 @@ func cFloatArrayToGoSlice(cArray *C.float, length C.int) []float32 {
 	return result
 }
 
+// Helper function to convert C **_Ctype_float to Go [][]float32
+func cFloat2DArrayToGoSlice(cArray **C.float, numRows C.int, numCols C.int) [][]float32 {
+    if cArray == nil || numRows == 0 {
+        return nil // Return empty slice if cArray is nil or length is zero
+    }
+    
+    result := make([][]float32, int(numRows))
+    rows := (*[1<<28]*C.float)(unsafe.Pointer(cArray))[:numRows:numRows]
+    
+    for i := 0; i < int(numRows); i++ {
+        result[i] = make([]float32, int(numCols))
+        if rows[i] != nil {
+            cols := (*[1<<28]C.float)(unsafe.Pointer(rows[i]))[:numCols:numCols]
+            for j := 0; j < int(numCols); j++ {
+                result[i][j] = float32(cols[j])
+            }
+        }
+    }
+    return result
+}
+
 func (recognizer *OnlineRecognizer) GetJsonResult(s *OnlineStream) *OnlineRecognizerResult {
 	p := C.SherpaOnnxGetOnlineStreamResult(recognizer.impl, s.impl)
 	defer C.SherpaOnnxDestroyOnlineRecognizerResult(p)
@@ -442,6 +476,18 @@ func (recognizer *OnlineRecognizer) GetJsonResult(s *OnlineStream) *OnlineRecogn
 		jsonStr = &j
 	}
 	result.Json = jsonStr
+
+	// Handle log probabilities
+	var logProbs *[][]float32
+	if p.log_probs != nil && p.num_log_probs > 0 {
+		// Use the log_probs_dim field from the C struct for the number of columns
+		numCols := p.log_probs_dim
+		
+		lp := cFloat2DArrayToGoSlice(p.log_probs, p.num_log_probs, numCols)
+		logProbs = &lp
+	}
+	result.LogProbs = logProbs
+	
 	return result
 }
 
