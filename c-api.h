@@ -225,6 +225,14 @@ SherpaOnnxCreateOnlineRecognizer(
 SHERPA_ONNX_API void SherpaOnnxDestroyOnlineRecognizer(
     const SherpaOnnxOnlineRecognizer *recognizer);
 
+/// Set the blank penalty for an online recognizer at runtime.
+///
+/// @param recognizer A pointer returned by SherpaOnnxCreateOnlineRecognizer()
+/// @param blank_penalty The new blank penalty value
+SHERPA_ONNX_API void SherpaOnnxOnlineRecognizerSetBlankPenalty(
+    const SherpaOnnxOnlineRecognizer *recognizer,
+    float blank_penalty);
+
 /// Create an online stream for accepting wave samples.
 ///
 /// @param recognizer  A pointer returned by SherpaOnnxCreateOnlineRecognizer()
@@ -248,6 +256,11 @@ SherpaOnnxCreateOnlineStreamWithHotwords(
 /// @param stream A pointer returned by SherpaOnnxCreateOnlineStream()
 SHERPA_ONNX_API void SherpaOnnxDestroyOnlineStream(
     const SherpaOnnxOnlineStream *stream);
+
+/// Set a per-stream blank penalty override. Pass a negative value (e.g. -1)
+/// to clear the override and revert to the recognizer/decoder default.
+SHERPA_ONNX_API void SherpaOnnxOnlineStreamSetBlankPenalty(
+    const SherpaOnnxOnlineStream *stream, float blank_penalty);
 
 /// Accept input audio samples and compute the features.
 /// The user has to invoke SherpaOnnxDecodeOnlineStream() to run the neural

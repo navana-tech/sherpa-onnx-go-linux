@@ -309,6 +309,13 @@ func (s *OnlineStream) InputFinished() {
 	C.SherpaOnnxOnlineStreamInputFinished(s.impl)
 }
 
+// SetBlankPenalty sets a per-stream blank penalty override used during decoding.
+// Pass a negative value (e.g. -1) to clear the override and revert to the
+// recognizer/decoder default.
+func (s *OnlineStream) SetBlankPenalty(blankPenalty float32) {
+	C.SherpaOnnxOnlineStreamSetBlankPenalty(s.impl, C.float(blankPenalty))
+}
+
 // Check whether the stream has enough feature frames for decoding.
 // Return true if this stream is ready for decoding. Return false otherwise.
 //
@@ -340,6 +347,11 @@ func (recognizer *OnlineRecognizer) IsEndpoint(s *OnlineStream) bool {
 func (recognizer *OnlineRecognizer) Reset(s *OnlineStream) {
 	C.SherpaOnnxOnlineStreamReset(recognizer.impl, s.impl)
 }
+
+func (recognizer *OnlineRecognizer) SetBlankPenalty(blankPenalty float32) {
+	C.SherpaOnnxOnlineRecognizerSetBlankPenalty(recognizer.impl, C.float(blankPenalty))
+}
+
 
 // Decode the stream. Before calling this function, you have to ensure
 // that recognizer.IsReady(s) returns true. Otherwise, you will be SAD.
